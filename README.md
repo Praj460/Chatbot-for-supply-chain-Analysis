@@ -1,6 +1,9 @@
 📊 AI-Powered Data Analysis with Gemini
+
 This application allows users to upload datasets, perform exploratory data analysis (EDA), clean and preprocess data, filter by timelines, ask questions about the data, and visualize data using interactive charts. It leverages Google Gemini (Gemini 2.0) for AI-powered insights and Streamlit for the user interface.
+
 🛠️ Requirements
+
 Make sure you have the following installed:
 
 Python 3.x
