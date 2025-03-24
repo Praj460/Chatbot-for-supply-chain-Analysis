@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 import chardet
+import plotly.express as px
 import google.generativeai as genai
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
@@ -21,72 +22,151 @@ genai.configure(api_key=api_key)
 # Streamlit UI
 st.title("📊 AI-Powered Data Analysis with Gemini")
 
-# File Upload
-uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
+# -----------------------------
+# 📁 Load Dataset from Code
+# -----------------------------
+file_path = "/Users/prajwalanand/Documents/Gemini /SCMS_Delivery_History_Dataset_20150929.csv"  # Change this to your file path
 
-if uploaded_file:
-    try:
-        file_extension = uploaded_file.name.split(".")[-1]
+# Detect encoding
+with open(file_path, 'rb') as f:
+    raw_data = f.read()
+    detected_encoding = chardet.detect(raw_data)['encoding']
 
-        if file_extension == "csv":
-            # Detect encoding
-            raw_data = uploaded_file.read()
-            detected_encoding = chardet.detect(raw_data)['encoding']
+# Read CSV using detected encoding
+df = pd.read_csv(file_path, encoding=detected_encoding, encoding_errors='replace')
 
-            # Read file with detected encoding (newer pandas versions)
-            uploaded_file.seek(0)  # Reset file position
-            df = pd.read_csv(uploaded_file, encoding=detected_encoding, encoding_errors='replace')
+# -----------------------------
+# 🧹 Preprocessing & EDA
+# -----------------------------
+# Convert columns to appropriate data types
+df["Weight (Kilograms)"] = pd.to_numeric(df["Weight (Kilograms)"], errors="coerce")
+df["Freight Cost (USD)"] = pd.to_numeric(df["Freight Cost (USD)"], errors="coerce")
 
-        else:
-            df = pd.read_excel(uploaded_file)
+# Convert date columns to datetime format
+date_columns = [
+    "PQ First Sent to Client Date",
+    "PO Sent to Vendor Date",
+    "Scheduled Delivery Date",
+    "Delivered to Client Date",
+    "Delivery Recorded Date",
+]
+for col in date_columns:
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
 
-        # Display dataset
-        st.subheader("📜 Preview of Dataset")
-        st.dataframe(df.head())
+# Fill missing values in categorical columns with 'Unknown'
+categorical_cols = ["Shipment Mode", "Dosage"]
+for col in categorical_cols:
+    if col in df.columns:
+        df[col] = df[col].fillna("Unknown")
 
-        # Convert dataset to a text-friendly format
-        dataset_summary = df.describe().to_string()  # Get statistical summary
-        dataset_text = f"Dataset Columns: {list(df.columns)}\n\nSummary:\n{dataset_summary}"
+# Fill missing numerical values with the median
+numerical_cols = ["Line Item Insurance (USD)"]
+for col in numerical_cols:
+    if col in df.columns:
+        df[col] = df[col].fillna(df[col].median())
 
-        # User input
-        st.subheader("🔍 Ask a Question About the Dataset")
-        user_query = st.text_area("Type your question here")
+# -----------------------------
+# 📜 Preview Data
+# -----------------------------
+st.subheader("📜 Preview of Dataset")
+st.dataframe(df.head())
 
-        if st.button("Generate Analysis"):
-            if user_query.strip():
-                try:
-                    structured_prompt = f"""
-            You are an AI specialized in supply chain and procurement analytics. 
-            Given the dataset containing procurement details, order tracking, pricing, and delivery records, 
-            analyze the data to provide insights for different stakeholders like suppliers, manufacturers, and 
-            clients. 
+# -----------------------------
+# 🗓️ Timeline Slicer
+# -----------------------------
+datetime_columns = [col for col in date_columns if col in df.columns and pd.api.types.is_datetime64_any_dtype(df[col])]
 
-            **Dataset Overview:**
-            - Columns: {list(df.columns)}
-            - Summary: {df.describe().to_string()[:1000]}  # Truncate long summaries
+if datetime_columns:
+    st.subheader("🗓️ Filter by Timeline")
+    selected_time_col = st.selectbox("Select date/time column", datetime_columns)
 
-            **User Query:**
-            {user_query}
+    min_date = df[selected_time_col].min()
+    max_date = df[selected_time_col].max()
 
-            **Instructions:**
-            - Provide a concise, data-driven response.
-            - Avoid multiple messages; return a single final answer.
-            - If needed, include relevant statistics or insights.
+    if pd.isnull(min_date) or pd.isnull(max_date):
+        st.warning(f"The selected column '{selected_time_col}' does not contain valid dates to filter.")
+    else:
+        # Convert to native Python date for Streamlit compatibility
+        start_date, end_date = st.slider(
+            "Select date range",
+            min_value=min_date.date(),
+            max_value=max_date.date(),
+            value=(min_date.date(), max_date.date()),
+            format="YYYY-MM-DD"
+        )
+
+        # Convert start and end back to datetime for filtering
+        start_datetime = pd.to_datetime(start_date)
+        end_datetime = pd.to_datetime(end_date)
+
+        df = df[(df[selected_time_col] >= start_datetime) & (df[selected_time_col] <= end_datetime)]
+        st.success(f"Filtered data from {start_date} to {end_date}")
+
+
+# -----------------------------
+# 🤖 Gemini Chatbot
+# -----------------------------
+st.subheader("🔍 Ask a Question About the Dataset")
+user_query = st.text_area("Type your question here")
+
+if st.button("Generate Analysis"):
+    if user_query.strip():
+        try:
+            structured_prompt = f"""
+You are an AI specialized in supply chain and procurement analytics. 
+Given the dataset containing procurement details, order tracking, pricing, and delivery records, 
+analyze the data to provide insights for different stakeholders like suppliers, manufacturers, and clients. 
+
+**Dataset Overview:**
+- Columns: {list(df.columns)}
+- Summary: {df.describe().to_string()[:1000]}
+
+**User Query:**
+{user_query}
+
+**Instructions:**
+- Provide a concise, data-driven response.
+- Avoid multiple messages; return a single final answer.
+- If needed, include relevant statistics or insights.
+- Do not return any code snippets.
             """
 
-                    # Send dataset summary + user query to Gemini AI
-                    model = ChatGoogleGenerativeAI(model="gemini-1.5-pro")  # Change model if needed
-                    message = HumanMessage(content=structured_prompt)
-                    response = model.invoke([message])  # Ensures a single final answer
+            model = ChatGoogleGenerativeAI(model="gemini-2.0-flash")
+            message = HumanMessage(content=structured_prompt)
+            response = model.invoke([message])
 
-                    # Display AI response
-                    st.subheader("📊 AI Analysis")
-                    st.write(response.content)  # Corrected: Directly access content
+            st.subheader("📊 AI Analysis")
+            st.write(response.content)
 
-                except Exception as e:
-                    st.error(f"Error: {str(e)}")
-        else:
-            st.warning("Please enter a question before generating an analysis.")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+    else:
+        st.warning("Please enter a question before generating an analysis.")
+
+# -----------------------------
+# 📈 Plotly Visualizations
+# -----------------------------
+st.subheader("📈 Visualize Your Data")
+
+chart_type = st.selectbox("Choose a chart type", ["Line", "Bar", "Histogram", "Scatter"])
+numeric_columns = df.select_dtypes(include=["number"]).columns.tolist()
+all_columns = df.columns.tolist()
+
+x_col = st.selectbox("Select X-axis column", all_columns)
+y_col = st.selectbox("Select Y-axis column", numeric_columns if chart_type != "Histogram" else all_columns)
+
+if st.button("Generate Chart"):
+    try:
+        if chart_type == "Line":
+            fig = px.line(df, x=x_col, y=y_col)
+        elif chart_type == "Bar":
+            fig = px.bar(df, x=x_col, y=y_col)
+        elif chart_type == "Histogram":
+            fig = px.histogram(df, x=y_col)
+        elif chart_type == "Scatter":
+            fig = px.scatter(df, x=x_col, y=y_col)
+
+        st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.error(f"Error loading file: {str(e)}")
-
+        st.error(f"Error generating chart: {str(e)}")
