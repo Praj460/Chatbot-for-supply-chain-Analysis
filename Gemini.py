@@ -7,6 +7,7 @@ import google.generativeai as genai
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
+from statsmodels.tsa.statespace.sarimax import SARIMAX
 
 # Load environment variables
 load_dotenv()
@@ -143,6 +144,37 @@ analyze the data to provide insights for different stakeholders like suppliers, 
             st.error(f"Error: {str(e)}")
     else:
         st.warning("Please enter a question before generating an analysis.")
+#---------------------------
+# Demand Forecasting Function
+#---------------------------
+def forecast_sales(df, filter_col, filter_value):
+    filtered_df = df[df[filter_col] == filter_value]
+    sales_data = (filtered_df.groupby("Delivered to Client Date")
+                  .agg({"Line Item Quantity": "sum"})
+                  .asfreq('W')  # Weekly frequency
+                  .fillna(0))  # Fill missing weeks with 0
+    
+    model = SARIMAX(sales_data, order=(1,1,1), seasonal_order=(1,1,1,4))
+    results = model.fit()
+    forecast = results.forecast(steps=4)  # Predict next 4 weeks
+    
+    return sales_data, forecast
+
+# Forecast for Product
+st.subheader("📈 Forecast Sales for a Product")
+product_list = df["Product Group"].dropna().unique()
+selected_product = st.selectbox("Select Product", product_list)
+if st.button("Forecast Product Sales"):
+    sales_data, forecast = forecast_sales(df, "Product Group", selected_product)
+    st.line_chart(pd.concat([sales_data, forecast.to_frame("Forecast")]))
+
+# Forecast for Region
+st.subheader("📈 Forecast Sales for a Region")
+region_list = df["Country"].dropna().unique()
+selected_region = st.selectbox("Select Region", region_list)
+if st.button("Forecast Regional Sales"):
+    sales_data, forecast = forecast_sales(df, "Country", selected_region)
+    st.line_chart(pd.concat([sales_data, forecast.to_frame("Forecast")]))
 
 # -----------------------------
 # 📈 Plotly Visualizations
