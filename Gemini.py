@@ -73,7 +73,7 @@ st.subheader("📜 Preview of Dataset")
 st.dataframe(df.head())
 
 # Create tabs
-tab1, tab2, tab3 = st.tabs(["🤖 Chatbot", "📈 Demand Forecasting", "📊 Graph Generator"])
+tab1, tab2, tab3, tab4 = st.tabs(["🤖 Chatbot", "📈 Demand Forecasting", "📊 Graph Generator", "💰 Unit Price Prediction"])
 
 with tab1:
     st.header("🤖 Supply Chain Analytics Chatbot")
@@ -151,51 +151,51 @@ with tab2:
             st.error(f"Forecasting error: {str(e)}")
             return sales_data, None
 
-    col1, col2 = st.columns(2)
+    # Product Demand Forecast
+    st.subheader("Product Demand Forecast")
+    product_list = df["Product Group"].dropna().unique()
+    selected_product = st.selectbox("Select Product", product_list)
     
-    with col1:
-        # Forecast for Product
-        st.subheader("Product Demand Forecast")
-        product_list = df["Product Group"].dropna().unique()
-        selected_product = st.selectbox("Select Product", product_list)
-        
-        if st.button("Forecast Product Sales"):
-            with st.spinner("Generating forecast..."):
-                sales_data, forecast = forecast_sales(df, "Product Group", selected_product)
-                if sales_data is not None:
-                    if forecast is not None:
-                        result_df = pd.concat([sales_data, forecast.to_frame("Forecast")])
-                        st.line_chart(result_df)
-                        st.write(f"Forecast for next 4 weeks: {forecast.tolist()}")
-                    else:
-                        st.warning("Not enough data to generate a forecast. Please select another product.")
+    if st.button("Forecast Product Sales"):
+        with st.spinner("Generating forecast..."):
+            sales_data, forecast = forecast_sales(df, "Product Group", selected_product)
+            if sales_data is not None:
+                if forecast is not None:
+                    result_df = pd.concat([sales_data, forecast.to_frame("Forecast")])
+                    
+                    # Create a more informative chart using Plotly
+                    fig = px.line(
+                        result_df, 
+                        y=["Line Item Quantity", "Forecast"],
+                        title=f"Demand Forecast for {selected_product}"
+                    )
+                    fig.update_layout(
+                        yaxis_title="Quantity", 
+                        xaxis_title="Date",
+                        legend_title="Data Type",
+                        hovermode="x unified"
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Display forecast values in a more readable format
+                    st.subheader("Forecast for next 4 weeks")
+                    forecast_df = forecast.to_frame("Forecasted Quantity")
+                    forecast_df.index = forecast_df.index.strftime('%b %d, %Y')
+                    st.dataframe(forecast_df.astype(int))
                 else:
-                    st.warning("No data available for the selected product.")
-    
-    with col2:
-        # Forecast for Region
-        st.subheader("Regional Demand Forecast")
-        region_list = df["Country"].dropna().unique()
-        selected_region = st.selectbox("Select Region", region_list)
-        
-        if st.button("Forecast Regional Sales"):
-            with st.spinner("Generating forecast..."):
-                sales_data, forecast = forecast_sales(df, "Country", selected_region)
-                if sales_data is not None:
-                    if forecast is not None:
-                        result_df = pd.concat([sales_data, forecast.to_frame("Forecast")])
-                        st.line_chart(result_df)
-                        st.write(f"Forecast for next 4 weeks: {forecast.tolist()}")
-                    else:
-                        st.warning("Not enough data to generate a forecast. Please select another region.")
-                else:
-                    st.warning("No data available for the selected region.")
+                    st.warning("Not enough data to generate a forecast. Please select another product.")
+            else:
+                st.warning("No data available for the selected product.")
     
     # Additional forecasting options
     st.subheader("Custom Demand Forecast")
-    custom_column = st.selectbox("Select dimension to forecast by", 
-                               df.select_dtypes(include=["object"]).columns.tolist(), 
-                               help="Choose a categorical column to forecast by")
+    st.write("Select any dimension to forecast demand by:")
+    
+    custom_column = st.selectbox(
+        "Select dimension to forecast by", 
+        df.select_dtypes(include=["object"]).columns.tolist(), 
+        help="Choose any categorical column to forecast by"
+    )
     
     if custom_column:
         custom_values = df[custom_column].dropna().unique()
@@ -207,8 +207,43 @@ with tab2:
                 if sales_data is not None:
                     if forecast is not None:
                         result_df = pd.concat([sales_data, forecast.to_frame("Forecast")])
-                        st.line_chart(result_df)
-                        st.write(f"Forecast for next 4 weeks: {forecast.tolist()}")
+                        
+                        # Enhanced visualization
+                        fig = px.line(
+                            result_df, 
+                            y=["Line Item Quantity", "Forecast"],
+                            title=f"Demand Forecast for {custom_column}: {selected_value}"
+                        )
+                        fig.update_layout(
+                            yaxis_title="Quantity", 
+                            xaxis_title="Date",
+                            legend_title="Data Type",
+                            hovermode="x unified"
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Display forecast statistics
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(
+                                "Average Weekly Demand", 
+                                f"{int(sales_data['Line Item Quantity'].mean())}", 
+                                delta=f"{int(forecast.mean() - sales_data['Line Item Quantity'].mean())}"
+                            )
+                        with col2:
+                            growth_rate = ((forecast.mean() / sales_data['Line Item Quantity'].mean()) - 1) * 100
+                            st.metric(
+                                "Forecast Growth", 
+                                f"{growth_rate:.1f}%",
+                                delta=f"{growth_rate:.1f}%",
+                                delta_color="normal"
+                            )
+                        
+                        # Display forecast values
+                        st.subheader("Detailed Forecast")
+                        forecast_df = forecast.to_frame("Forecasted Quantity")
+                        forecast_df.index = forecast_df.index.strftime('%b %d, %Y')
+                        st.dataframe(forecast_df.astype(int))
                     else:
                         st.warning(f"Not enough data to generate a forecast for {selected_value}.")
                 else:
@@ -351,3 +386,270 @@ with tab3:
         except Exception as e:
             st.error(f"Error generating chart: {str(e)}")
             st.info("Try selecting different columns or chart type")
+    
+# Add this as a new tab in your application
+
+with tab4:
+    st.header("💰 Unit Price Prediction")
+    
+    # -----------------------------
+    # Unit Price Analysis & Prediction
+    # -----------------------------
+    
+    # First check if we have unit price in the dataset
+    if "Unit Price (USD)" not in df.columns:
+        # Try to calculate it if we have line item value and quantity
+        if "Line Item Value" in df.columns and "Line Item Quantity" in df.columns:
+            # Create a copy of the dataframe to avoid SettingWithCopyWarning
+            df = df.copy()
+            # Convert columns to numeric to ensure division works properly
+            df["Line Item Value"] = pd.to_numeric(df["Line Item Value"], errors="coerce")
+            df["Line Item Quantity"] = pd.to_numeric(df["Line Item Quantity"], errors="coerce")
+            # Calculate Unit Price and handle division by zero
+            df["Unit Price (USD)"] = df.apply(
+                lambda row: row["Line Item Value"] / row["Line Item Quantity"] 
+                if row["Line Item Quantity"] > 0 else None, 
+                axis=1
+            )
+            st.success("Unit Price calculated from Line Item Value and Quantity")
+        else:
+            # Check column names and provide info about available columns
+            st.error("Unit Price data not available and cannot be calculated")
+            st.write("Available columns that might contain price information:")
+            price_related_cols = [col for col in df.columns if any(term in col.lower() 
+                                 for term in ["price", "cost", "value", "amount", "usd"])]
+            if price_related_cols:
+                st.info(f"Found these price-related columns: {', '.join(price_related_cols)}")
+                
+                # Let user select columns to calculate unit price
+                value_col = st.selectbox("Select column containing total value", 
+                                      price_related_cols + ["None"])
+                quantity_col = st.selectbox("Select column containing quantity", 
+                                         [col for col in df.columns if "quantity" in col.lower()] + ["None"])
+                
+                if value_col != "None" and quantity_col != "None" and st.button("Calculate Unit Price"):
+                    df = df.copy()
+                    df[value_col] = pd.to_numeric(df[value_col], errors="coerce")
+                    df[quantity_col] = pd.to_numeric(df[quantity_col], errors="coerce")
+                    df["Unit Price (USD)"] = df.apply(
+                        lambda row: row[value_col] / row[quantity_col] 
+                        if pd.notnull(row[value_col]) and pd.notnull(row[quantity_col]) and row[quantity_col] > 0 
+                        else None, 
+                        axis=1
+                    )
+                    st.success(f"Unit Price calculated from {value_col} and {quantity_col}")
+                else:
+                    st.stop()
+            else:
+                st.info("Your dataset doesn't contain obvious price-related columns. Please check your data.")
+                st.stop()
+    
+    # Option to choose between Time Series and Regression models
+    prediction_model = st.radio(
+        "Select Price Prediction Model Type",
+        ["Time Series Analysis", "Feature-based Regression"],
+        help="Time Series predicts future prices based on historical patterns. Regression predicts prices based on product attributes."
+    )
+    
+    if prediction_model == "Time Series Analysis":
+        # Similar approach to the demand forecasting
+        st.subheader("Time Series Price Prediction")
+        
+        # Select product for price prediction
+        product_for_price = st.selectbox(
+            "Select Product for Price Analysis", 
+            df["Product Group"].dropna().unique(),
+            key="price_product"
+        )
+        
+        # Define time series prediction function
+        def predict_price_timeseries(df, product):
+            product_df = df[df["Product Group"] == product].copy()
+            
+            if product_df.empty:
+                return None, None
+            
+            # Group by date and calculate average price
+            price_data = product_df.groupby(pd.Grouper(key="Delivered to Client Date", freq='M'))[["Unit Price (USD)"]].mean()
+            
+            # Drop missing values and check if we have enough data
+            price_data = price_data.dropna()
+            if len(price_data) < 5:
+                return price_data, None
+            
+            try:
+                # SARIMAX model for price forecasting
+                model = SARIMAX(price_data, order=(1,1,1), seasonal_order=(1,1,1,12))
+                results = model.fit(disp=False)
+                forecast = results.forecast(steps=6)  # Predict next 6 months
+                return price_data, forecast
+            except Exception as e:
+                st.error(f"Prediction error: {str(e)}")
+                return price_data, None
+        
+        if st.button("Predict Price Trends"):
+            with st.spinner("Analyzing price patterns..."):
+                price_history, price_forecast = predict_price_timeseries(df, product_for_price)
+                
+                if price_history is not None:
+                    if price_forecast is not None:
+                        # Plot the historical prices and forecasts
+                        result_df = pd.concat([price_history, price_forecast.to_frame("Forecast")])
+                        
+                        # Create a Plotly chart for better visualization
+                        fig = px.line(
+                            result_df, 
+                            y=["Unit Price (USD)", "Forecast"] if "Forecast" in result_df.columns else ["Unit Price (USD)"],
+                            title=f"Price Trend Analysis for {product_for_price}"
+                        )
+                        fig.update_layout(yaxis_title="Unit Price (USD)", xaxis_title="Date")
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Display forecast values
+                        st.subheader("Price Forecast")
+                        forecast_df = price_forecast.to_frame("Forecast Price (USD)")
+                        forecast_df.index = forecast_df.index.strftime('%B %Y')
+                        st.dataframe(forecast_df.round(2))
+                        
+                        # Calculate price volatility
+                        volatility = price_history["Unit Price (USD)"].std() / price_history["Unit Price (USD)"].mean() * 100
+                        st.metric("Price Volatility", f"{volatility:.2f}%", 
+                                 delta=None, delta_color="inverse")
+                    else:
+                        st.warning(f"Not enough price data to generate a forecast for {product_for_price}.")
+                else:
+                    st.warning(f"No price data available for {product_for_price}.")
+    
+    else:  # Feature-based Regression
+        st.subheader("Feature-based Price Prediction")
+        
+        # Import necessary libraries
+        from sklearn.ensemble import RandomForestRegressor
+        from sklearn.model_selection import train_test_split
+        from sklearn.preprocessing import OneHotEncoder, StandardScaler
+        from sklearn.compose import ColumnTransformer
+        from sklearn.pipeline import Pipeline
+        from sklearn.metrics import mean_absolute_error, r2_score
+        
+        # Function to build and train the price prediction model
+        def build_price_model(df):
+            # Drop rows with missing Unit Price
+            df_model = df.dropna(subset=["Unit Price (USD)"])
+            
+            # Select features to use for prediction
+            categorical_features = ["Product Group", "Shipment Mode", "Country", "Vendor", "Manufacturer"]
+            numerical_features = ["Line Item Quantity", "Weight (Kilograms)", "Freight Cost (USD)"]
+            
+            # Keep only features that exist in the dataset
+            categorical_features = [f for f in categorical_features if f in df_model.columns]
+            numerical_features = [f for f in numerical_features if f in df_model.columns]
+            
+            if not categorical_features and not numerical_features:
+                return None, None, None, None, None
+            
+            # Prepare features (X) and target (y)
+            X = df_model[categorical_features + numerical_features]
+            y = df_model["Unit Price (USD)"]
+            
+            # Split the data
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            # Create preprocessor for categorical and numerical features
+            categorical_transformer = Pipeline(steps=[
+                ('onehot', OneHotEncoder(handle_unknown='ignore'))
+            ])
+            
+            numerical_transformer = Pipeline(steps=[
+                ('scaler', StandardScaler())
+            ])
+            
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    ('cat', categorical_transformer, categorical_features),
+                    ('num', numerical_transformer, numerical_features)
+                ]
+            )
+            
+            # Create the model pipeline
+            model = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('regressor', RandomForestRegressor(n_estimators=100, random_state=42))
+            ])
+            
+            # Train the model
+            model.fit(X_train, y_train)
+            
+            # Evaluate on test set
+            y_pred = model.predict(X_test)
+            mae = mean_absolute_error(y_test, y_pred)
+            r2 = r2_score(y_test, y_pred)
+            
+            return model, categorical_features, numerical_features, mae, r2
+        
+        if st.button("Build Price Prediction Model"):
+            with st.spinner("Training model. This may take a moment..."):
+                try:
+                    model, cat_features, num_features, mae, r2 = build_price_model(df)
+                    
+                    if model:
+                        # Display model performance
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric("Mean Absolute Error", f"${mae:.2f}")
+                        with col2:
+                            st.metric("R² Score", f"{r2:.2f}")
+                        
+                        # Feature importance
+                        if hasattr(model['regressor'], 'feature_importances_'):
+                            # Get feature names after one-hot encoding
+                            feature_names = model['preprocessor'].get_feature_names_out()
+                            feature_importance = model['regressor'].feature_importances_
+                            
+                            # Create a DataFrame for visualization
+                            fi_df = pd.DataFrame({
+                                'Feature': feature_names,
+                                'Importance': feature_importance
+                            }).sort_values('Importance', ascending=False).head(10)
+                            
+                            # Plot feature importance
+                            st.subheader("Top Factors Influencing Price")
+                            fig = px.bar(fi_df, x='Importance', y='Feature', orientation='h')
+                            st.plotly_chart(fig, use_container_width=True)
+                        
+                        # Interactive price prediction
+                        st.subheader("Predict Unit Price")
+                        st.write("Select values to predict price for a specific scenario:")
+                        
+                        # Create input form for prediction
+                        prediction_inputs = {}
+                        
+                        # Add categorical features
+                        for feature in cat_features:
+                            unique_values = df[feature].dropna().unique()
+                            prediction_inputs[feature] = st.selectbox(f"Select {feature}", unique_values)
+                        
+                        # Add numerical features
+                        for feature in num_features:
+                            min_val = float(df[feature].min())
+                            max_val = float(df[feature].max())
+                            mean_val = float(df[feature].mean())
+                            prediction_inputs[feature] = st.slider(
+                                f"Select {feature}", 
+                                min_value=min_val,
+                                max_value=max_val,
+                                value=mean_val
+                            )
+                        
+                        # Create prediction dataframe
+                        pred_df = pd.DataFrame([prediction_inputs])
+                        
+                        # Make prediction
+                        predicted_price = model.predict(pred_df)[0]
+                        
+                        # Display prediction
+                        st.subheader("Predicted Unit Price")
+                        st.markdown(f"<h1 style='text-align: center; color: #1E88E5;'>${predicted_price:.2f}</h1>", unsafe_allow_html=True)
+                    else:
+                        st.error("Couldn't build the model. Please check if the dataset contains the necessary features.")
+                except Exception as e:
+                    st.error(f"Error building model: {str(e)}")
