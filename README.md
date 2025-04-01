@@ -7,6 +7,7 @@ This project is a **Streamlit-based AI-powered supply chain analysis tool** util
 - **📊 Data Preprocessing & EDA**: Cleans and formats datasets for analysis.
 - **🤖 AI Chatbot**: Leverages Google Gemini AI to answer dataset-related queries.
 - **📈 Forecasting**: Uses SARIMAX to predict product demand trends.
+- **📈  Unit Price Prediction: Estimates future unit prices based on historical data.
 - **📉 Interactive Data Visualization**: Provides customizable charts (Line, Bar, Scatter, Histogram) using Plotly.
 
 ## 🔧 Installation
