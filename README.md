@@ -42,8 +42,6 @@ pip install -r requirements.txt
 streamlit run Gemini.py
 ```
 
-### Access the app in your browser:
-Open [http://localhost:8501](http://localhost:8501) to interact with the application.
 
 ## 💻 Usage
 - Upload your dataset.
