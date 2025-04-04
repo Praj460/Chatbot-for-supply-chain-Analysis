@@ -64,6 +64,7 @@ streamlit run Gemini.py
 - Add real-time API integration for live data fetching.
 - Enhance forecasting models with deep learning techniques.
 - Improve chatbot accuracy with fine-tuned prompts.
+- Improve UI/UX.
 
 
 
