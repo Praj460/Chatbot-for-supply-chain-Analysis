@@ -13,8 +13,7 @@ A Streamlit app for **pharma supply-chain analytics** with live Google Sheets in
    - Follow-up memory and “Generate Visualization” toggle  
 
 2. **📈 Demand Forecasting**  
-   - Traditional SARIMAX forecasts with reliability scoring  
-   - Deep-learning N-BEATS forecasting option via `darts`  
+   - Traditional SARIMAX forecasts with reliability scoring   
    - Debug info, model metrics (RMSE, MAPE, R²), and confidence indicator  
 
 3. **📊 Interactive Visualization**  
