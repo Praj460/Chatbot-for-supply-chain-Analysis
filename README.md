@@ -33,31 +33,22 @@ A Streamlit app for **pharma supply-chain analytics** with live Google Sheets in
 
 ---
 
-## 🛠️ Installation
-
-1. **Clone the repo**  
-   ```bash
-   git clone https://github.com/Praj460/Chatbot-for-supply-chain-Analysis.git
-   cd Chatbot-for-supply-chain-Analysis
-
-### Create & activate a virtual environment
+## 🛠️ Installation & Setup
 
 ```bash
+# 1. Clone the repo
+git clone https://github.com/Praj460/Chatbot-for-supply-chain-Analysis.git
+cd Chatbot-for-supply-chain-Analysis
+
+# 2. Create & activate a virtual environment
 python3 -m venv venv
-source venv/bin/activate    # macOS/Linux
-venv\Scripts\activate       # Windows
+# macOS/Linux
+source venv/bin/activate
+# Windows
+venv\Scripts\activate
 
-### 🔧 Set up Google Sheets API
+# 3. Install dependencies
+pip install -r requirements.txt
 
-1. Create a service account in GCP and enable the **Google Sheets API** & **Google Drive API**  
-2. Download the `service_account.json` key file and place it in the project root  
-3. Share your Google Sheet (named `Supply_Chain_Data`) with the service-account email  
-
----
-
-### ⚙️ Configuration
-
-```bash
-# Copy the example env file
-cp .env.example .env
-
+# 4. (Optional) Install Darts for deep forecasting
+pip install "darts[torch]"
