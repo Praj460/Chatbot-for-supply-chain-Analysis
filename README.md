@@ -50,5 +50,4 @@ venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Install Darts for deep forecasting
-pip install "darts[torch]"
+
