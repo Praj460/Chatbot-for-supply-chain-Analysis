@@ -1,4 +1,4 @@
-# AI-Powered Supply Chain Analysis
+# Data-Driven Optimization of Pharma Manufacturing and Distribution
 
 A Streamlit app for **pharma supply-chain analytics** with live Google Sheets integration, AI-driven chatbot (Google Gemini), demand forecasting (SARIMA & deep learning), visualization, and unit-price prediction.
 
