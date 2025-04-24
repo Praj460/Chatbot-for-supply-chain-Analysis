@@ -47,17 +47,17 @@ python3 -m venv venv
 source venv/bin/activate    # macOS/Linux
 venv\Scripts\activate       # Windows
 
-##Install dependencies
-pip install -r requirements.txt
+## 🔧 Set up Google Sheets API
 
-##Set up Google Sheets API
+1. Create a service account in GCP and enable the **Google Sheets API** & **Google Drive API**  
+2. Download the `service_account.json` key file and place it in the project root  
+3. Share your Google Sheet (named `Supply_Chain_Data`) with the service-account email  
 
-1.Create a service account in GCP and enable the Google Sheets API & Google Drive API
+---
 
-2.Download the service_account.json key file and place it in the project root
+## ⚙️ Configuration
 
-3.Share your Google Sheet (named Supply_Chain_Data) with the service-account email
+```bash
+# Copy the example env file
+cp .env.example .env
 
-##Running the App
-
-streamlit run app.py
