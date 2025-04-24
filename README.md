@@ -1,70 +1,128 @@
-# AI-Powered Data Analysis with Gemini
+Here’s a comprehensive **README.md** you can drop into the root of your repo. It covers everything—from setup to features—so newcomers (and future you) can get running in minutes.
 
-## 📌 Overview
-This project is a **Streamlit-based AI-powered supply chain analysis tool** utilizing **Google's Gemini AI**, **Plotly**, and **SARIMAX** for forecasting. It enables users to analyze procurement, order tracking, pricing, and delivery records interactively.
+```markdown
+# AI-Powered Supply Chain Analysis
+
+A Streamlit app for **pharma supply-chain analytics** with live Google Sheets integration, AI-driven chatbot (Google Gemini), demand forecasting (SARIMA & deep learning), visualization, and unit-price prediction.
+
+---
 
 ## 🚀 Features
-- **📊 Data Preprocessing & EDA**: Cleans and formats datasets for analysis.
-- **🤖 AI Chatbot**: Leverages Google Gemini AI to answer dataset-related queries.
-- **📈 Forecasting**: Uses SARIMAX to predict product demand trends.
-- **📈  Unit Price Prediction: Estimates future unit prices based on historical data.
-- **📉 Interactive Data Visualization**: Provides customizable charts (Line, Bar, Scatter, Histogram) using Plotly.
 
-## 🔧 Installation
-### Prerequisites
-Ensure you have **Python 3.8+** and **pip** installed.
+1. **🤖 PharmaBot Chatbot**  
+   - Ask any question about your shipment data  
+   - Context-aware RAG pipeline with embedding-based chunk retrieval  
+   - Structured JSON prompts for accurate, data-driven answers  
+   - Follow-up memory and optional “Generate Visualization” toggle  
 
-```bash
-pip install -r requirements.txt
-```
+2. **📈 Demand Forecasting**  
+   - Traditional SARIMAX forecasts with reliability scoring  
+   - Deep-learning N-BEATS forecasting option via `darts`  
+   - Debug info, model metrics (RMSE, MAPE, R²), and confidence indicator  
 
-### API Key Setup
-1. Create a `.env` file in the project directory.
-2. Add your Google AI API key:
+3. **📊 Interactive Visualization**  
+   - Timeline slicers, multi-type charts (line, bar, histogram, pie, box, heatmap)  
+   - Filter by date, product, vendor, or any dimension  
+   - Downloadable (camera icon) and responsive design  
+
+4. **💰 Unit Price Prediction**  
+   - RandomForest regression for per-unit price  
+   - Combined with time-series pack-price forecasting  
+   - Key driver analysis and prediction intervals  
+
+5. **🔄 Live Data Backend**  
+   - Google Sheets API (no manual CSV uploads)  
+   - Service-account auth for secure, real-time sync  
+   - Outlier removal built into loader  
+
+---
+
+## 🛠️ Installation
+
+1. **Clone the repo**  
+   ```bash
+   git clone https://github.com/Praj460/Chatbot-for-supply-chain-Analysis.git
+   cd Chatbot-for-supply-chain-Analysis
    ```
-   GOOGLE_API_KEY=your_api_key_here
+
+2. **Create & activate a virtual environment**  
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # macOS/Linux
+   venv\Scripts\activate     # Windows
    ```
 
-## 🚀 How to Run the Application
-### Clone the repository:
+3. **Install dependencies**  
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Set up Google Sheets API**  
+   - Create a service account in GCP, enable Sheets & Drive APIs  
+   - Download `service_account.json` and place it in the project root  
+   - Share your Google Sheet (named `Supply_Chain_Data`) with the service-account email
+
+5. **(Optional) Install Darts for deep forecasting**  
+   ```bash
+   pip install "darts[torch]"
+   ```
+
+---
+
+## ⚙️ Configuration
+
+1. Copy `.env.example` to `.env` and set your Google API keys:
+   ```ini
+   GOOGLE_API_KEY=your_gemini_api_key
+   ```
+2. Ensure `service_account.json` is in the root (gitignored).
+
+---
+
+## 🚀 Running the App
+
 ```bash
-git clone https://github.com/your-repo-url.git
-cd your-repo-directory
+streamlit run app.py
 ```
 
-### Install the required dependencies:
-```bash
-pip install -r requirements.txt
+- **Chatbot** tab: Ask questions or visualize answers  
+- **Demand Forecasting**: Toggle SARIMA vs. Deep (N-BEATS)  
+- **Graph Generator**: Build custom charts with filters  
+- **Unit Price Prediction**: Predict per-unit costs  
+
+---
+
+## 📁 Project Structure
+
+```
+├── api/
+│   └── gemini_chat.py          # Gemini API wrapper
+├── components/
+│   ├── chatbot_ui.py           # RAG chatbot + viz button
+│   ├── forecast_ui.py          # SARIMA & deep forecasting UI
+│   ├── price_prediction_ui.py  # Unit price prediction UI
+│   └── visualization_ui.py     # General chart builder UI
+├── utils/
+│   ├── google_sheets_loader.py # Live data loader + outlier cleaning
+│   ├── forecasting.py          # SARIMAX forecasting logic
+│   ├── deep_forecasting.py     # N-BEATS DL forecasting logic
+│   ├── price_prediction.py     # RandomForest price model
+│   └── data_loader.py          # Legacy CSV loader (if needed)
+├── app.py                      # Main Streamlit app
+├── requirements.txt
+├── README.md
+└── .env                        # environment variables (gitignored)
 ```
 
-### Run the Streamlit app:
-```bash
-streamlit run Gemini.py
-```
+---
 
+## 🤝 Contributing
 
-## 💻 Usage
-- Upload your dataset.
-- Use the chatbot to analyze procurement insights.
-- Visualize data with interactive charts.
-- Forecast demand trends for products and regions.
+1. Fork this repo  
+2. Create a feature branch: `git checkout -b feature/YourFeature`  
+3. Commit your changes: `git commit -m "Add awesome feature"`  
+4. Push to your branch: `git push origin feature/YourFeature`  
+5. Open a Pull Request  
 
-## 📦 Dependencies
-- `streamlit`
-- `pandas`
-- `chardet`
-- `plotly`
-- `google-generativeai`
-- `python-dotenv`
-- `langchain-core`
-- `langchain-google-genai`
-- `statsmodels`
-
-## 🔮 Future Enhancements
-- Add real-time API integration for live data fetching.
-- Enhance forecasting models with deep learning techniques.
-- Improve chatbot accuracy with fine-tuned prompts.
-- Improve UI/UX.
-
-
+---
 
