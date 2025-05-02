@@ -1,22 +1,25 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import boxcox
+from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.stattools import adfuller
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+import itertools
 
 def improved_mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     epsilon = np.mean(y_true) * 0.01 if np.mean(y_true) > 0 else 0.01
-    percentage_errors = np.abs((y_true - y_pred) / np.maximum(y_true, epsilon)) * 100
-    percentage_errors = np.minimum(percentage_errors, 500)
-    return np.mean(percentage_errors)
+    pe = np.abs((y_true - y_pred) / np.maximum(y_true, epsilon)) * 100
+    return np.mean(np.minimum(pe, 500))
 
-def calculate_reliability_score(mape, r2):
-    mape = min(mape, 100) if mape is not None else 100
-    mape_score = max(0, 1 - (mape / 100))
-    r2_score_normalized = max(0, min(1, r2)) if r2 is not None else 0
-    reliability = (0.7 * mape_score + 0.3 * r2_score_normalized) * 100
-    return round(reliability)
+def inv_boxcox(y, lmbda):
+    """Inverse Box–Cox transform."""
+    if lmbda == 0:
+        return np.exp(y)
+    return np.power(y * lmbda + 1, 1.0 / lmbda)
+    
+    return np.power(y * lmbda + 1, 1.0 / lmbda)
+
 
 def get_forecast_accuracy_description(mape):
     if mape is None:
@@ -30,140 +33,158 @@ def get_forecast_accuracy_description(mape):
     else:
         return "Low accuracy forecast (MAPE > 30%)", "error"
 
-def get_model_quality_description(r2):
-    if r2 is None:
-        return "unknown"
-    elif r2 > 0.7:
-        return "strong"
-    elif r2 > 0.5:
-        return "moderate"
-    elif r2 > 0.3:
-        return "weak"
-    else:
-        return "very weak"
-
-def get_forecast_confidence_level(data_points, reliability_score=None):
-    if reliability_score is not None:
-        if reliability_score >= 70:
-            return "High", "green"
-        elif reliability_score >= 40:
-            return "Medium", "orange"
-        else:
-            return "Low", "red"
-    if data_points < 12:
-        return "Low", "red"
-    elif data_points < 24:
-        return "Medium", "orange"
-    else:
-        return "High", "green"
 
 # --- Forecast Function ---
-def forecast_sales(df, filter_col, filter_value, debug=False):
-    debug_info = {}
 
-    if filter_col not in df.columns:
-        error_msg = f"Filter column '{filter_col}' not found"
-        return (None, None, {"error": error_msg}, debug_info) if debug else (None, None, {"error": error_msg})
+def forecast_sales(
+    df: pd.DataFrame,
+    date_col: str = "Delivered to Client Date",
+    qty_col: str = "Line Item Quantity",
+    freq: str = "M",             # "M" or "W"
+    transform: str = "boxcox",   # None, "log", or "boxcox"
+    debug: bool = False
+):
+    """
+    Returns (history_df, forecast_series, metrics_dict[, debug_info])
+    where metrics_dict contains only 'RMSE', 'MAE', and 'MAPE'.
+    """
+    dbg = {}
 
-    filtered_df = df[df[filter_col] == filter_value].copy()
-    debug_info['filtered_rows'] = len(filtered_df)
+    # 1. Prepare & resample
+    ts = (
+        df
+        .assign(_dt=lambda d: pd.to_datetime(d[date_col], errors="coerce"))
+        .dropna(subset=["_dt", qty_col])
+        .set_index("_dt")[qty_col]
+        .resample(freq).sum()
+    )
+    dbg["initial_points"] = len(ts)
 
-    if "Delivered to Client Date" not in filtered_df.columns:
-        return (None, None, {"error": "Missing 'Delivered to Client Date'"}, debug_info) if debug else (None, None, {"error": "Missing 'Delivered to Client Date'"})
-
-    filtered_df["Delivered to Client Date"] = pd.to_datetime(filtered_df["Delivered to Client Date"], errors='coerce')
-    filtered_df.dropna(subset=["Delivered to Client Date"], inplace=True)
-    debug_info['rows_after_date_cleaning'] = len(filtered_df)
-
-    if "Line Item Quantity" not in filtered_df.columns:
-        return (None, None, {"error": "Missing 'Line Item Quantity'"}, debug_info) if debug else (None, None, {"error": "Missing 'Line Item Quantity'"})
-
-    Q1 = filtered_df['Line Item Quantity'].quantile(0.25)
-    Q3 = filtered_df['Line Item Quantity'].quantile(0.75)
+    # 2. Trim outliers via IQR
+    Q1, Q3 = ts.quantile([0.25, 0.75])
     IQR = Q3 - Q1
-    lower_bound = max(0, Q1 - 1.5 * IQR)
-    upper_bound = Q3 + 3.0 * IQR
+    lb, ub = max(0, Q1 - 1.5 * IQR), Q3 + 3 * IQR
+    mask = ts.between(lb, ub)
+    if (~mask).sum() < 0.1 * len(ts):
+        ts = ts[mask]
+        dbg["outliers_removed"] = int((~mask).sum())
+    dbg["post_trim_points"] = len(ts)
 
-    outlier_mask = (filtered_df['Line Item Quantity'] < lower_bound) | (filtered_df['Line Item Quantity'] > upper_bound)
-    if outlier_mask.sum() < 0.1 * len(filtered_df):
-        filtered_df = filtered_df[~outlier_mask]
-        debug_info['outliers_removed'] = int(outlier_mask.sum())
+    if len(ts) < 12:
+        err = {"error": "Insufficient data after trimming"}
+        return (ts.to_frame(name=qty_col), None, err, dbg) if debug else (ts.to_frame(name=qty_col), None, err)
 
-    sales_data = filtered_df.groupby("Delivered to Client Date")["Line Item Quantity"].sum()
-    sales_data = sales_data.asfreq('W').ffill().bfill().fillna(0)
-    debug_info['final_data_points'] = len(sales_data)
+    # 3. Transform
+    if transform == "log":
+        ts_t = np.log(ts + 1e-6)
+    elif transform == "boxcox":
+        arr, lam = boxcox(ts + 1e-6)
+        dbg["boxcox_lambda"] = lam
+        ts_t = pd.Series(arr, index=ts.index)
+    else:
+        ts_t = ts.copy()
 
-    if sales_data.empty or len(sales_data) < 5:
-        return (sales_data, None, {"error": "Insufficient data for forecasting"}, debug_info) if debug else (sales_data, None, {"error": "Insufficient data"})
+    # 4. Deseasonalize
+    period = 12 if freq == "M" else 52
+    decomp = seasonal_decompose(ts_t, model="additive", period=period, extrapolate_trend="freq")
+    ts_ds = (ts_t - decomp.seasonal).dropna()
+    dbg["deseason_points"] = len(ts_ds)
 
-    try:
-        adf_p = adfuller(sales_data)[1]
-        is_stationary = adf_p < 0.05
-        debug_info['stationarity_test'] = "Stationary" if is_stationary else "Non-stationary"
-        debug_info['adf_p_value'] = adf_p
-    except Exception:
-        is_stationary = False
+    # 5. Train/test split
+    split = int(0.8 * len(ts_ds))
+    train, test = ts_ds.iloc[:split], ts_ds.iloc[split:]
 
-    order = (1, 1, 1)
-    seasonal_order = (1, 1, 0, 12)
-    model_description = "Default SARIMA(1,1,1)(1,1,0,12)"
+    # 6. Auto SARIMA order search on small grid
+    best_aic = np.inf
+    best_order = None
+    for p, q in itertools.product([0,1,2], repeat=2):
+        for P, Q in itertools.product([0,1], repeat=2):
+            try:
+                mod = SARIMAX(
+                    train,
+                    order=(p,1,q),
+                    seasonal_order=(P,1,Q,period),
+                    enforce_stationarity=False,
+                    enforce_invertibility=False
+                )
+                res = mod.fit(disp=False, maxiter=50)
+                if res.aic < best_aic:
+                    best_aic, best_order = res.aic, (p,1,q,P,1,Q,period)
+            except:
+                continue
+    dbg["best_aic"] = best_aic
+    dbg["best_order"] = best_order
 
-    train_size = int(len(sales_data) * 0.8)
-    if len(sales_data) - train_size < 3:
-        train_size = len(sales_data) - 3
-    train_size = max(min(train_size, len(sales_data) - 1), 1)
-
-    train_data = sales_data.iloc[:train_size]
-    test_data = sales_data.iloc[train_size:]
-
-    model = SARIMAX(train_data, order=order, seasonal_order=seasonal_order, enforce_stationarity=False, enforce_invertibility=False)
-    results = model.fit(disp=False, maxiter=200)
+    # 7. Fit with best order & evaluate
+    p,d,q,P,D,Q_,per = best_order
+    model = SARIMAX(
+        train,
+        order=(p,d,q),
+        seasonal_order=(P,D,Q_,per),
+        enforce_stationarity=False,
+        enforce_invertibility=False
+    )
+    res = model.fit(disp=False, maxiter=200)
 
     metrics = {}
-    if len(test_data) >= 3:
-        forecast_test = results.get_forecast(steps=len(test_data)).predicted_mean
-        forecast_test = np.maximum(forecast_test, 0)
+    if len(test) >= 3:
+        pred_t = res.get_forecast(steps=len(test)).predicted_mean
 
-        rmse = np.sqrt(mean_squared_error(test_data, forecast_test))
-        mae = mean_absolute_error(test_data, forecast_test)
-        mape = improved_mean_absolute_percentage_error(test_data, forecast_test)
-        r2 = r2_score(test_data, forecast_test)
+        # inverse transform + reseasonalize
+        if transform == "log":
+            test_inv = np.exp(test)
+            pred_inv = np.exp(pred_t)
+        elif transform == "boxcox":
+            lam = dbg["boxcox_lambda"]
+            test_inv = inv_boxcox(test, lam)
+            pred_inv = inv_boxcox(pred_t, lam)
+        else:
+            test_inv, pred_inv = test, pred_t
 
+        # add back seasonality
+        seas = decomp.seasonal.reindex(test.index, method="nearest")
+        test_inv += seas
+        pred_inv += seas
+
+        df_eval = pd.DataFrame({"y": test_inv, "ŷ": pred_inv}).dropna()
+        y, ŷ = df_eval["y"], df_eval["ŷ"]
         metrics = {
-            'RMSE': float(rmse),
-            'MAE': float(mae),
-            'MAPE': float(mape),
-            'R2': float(r2),
-            'reliability_score': calculate_reliability_score(mape, r2)
+            "RMSE": np.sqrt(mean_squared_error(y, ŷ)),
+            "MAE": mean_absolute_error(y, ŷ),
+            "MAPE": (np.abs((y - ŷ) / y) * 100).mean()
         }
+
+    # 8. Refit full series + forecast forward
+    final_mod = SARIMAX(
+        ts_ds,
+        order=(p,d,q),
+        seasonal_order=(P,D,Q_,per),
+        enforce_stationarity=False,
+        enforce_invertibility=False
+    )
+    final_res = final_mod.fit(disp=False, maxiter=200)
+
+    steps = 6 if freq == "W" else 3
+    f_t = final_res.forecast(steps=steps)
+
+    # inverse + reseason
+    if transform == "log":
+        f_inv = np.exp(f_t)
+    elif transform == "boxcox":
+        lam = dbg["boxcox_lambda"]
+        f_inv = inv_boxcox(f_t, lam)
     else:
-        metrics = {
-            'RMSE': None,
-            'MAE': None,
-            'MAPE': None,
-            'R2': None,
-            'reliability_score': None,
-            'note': "Test set too small to evaluate accuracy"
-        }
+        f_inv = f_t
 
-    final_model = SARIMAX(sales_data, order=order, seasonal_order=seasonal_order, enforce_stationarity=False, enforce_invertibility=False)
-    final_results = final_model.fit(disp=False, maxiter=200)
-    forecast = final_results.forecast(steps=6)
-    forecast = np.maximum(forecast, 0)
-    forecast = pd.Series(forecast, index=pd.date_range(sales_data.index[-1] + pd.Timedelta(weeks=1), periods=6, freq='W'))
+    next_idx = pd.date_range(
+        start=ts.index[-1] + pd.DateOffset(**({"weeks":1} if freq=="W" else {"months":1})),
+        periods=steps,
+        freq=freq
+    )
+    forecast = pd.Series(
+        f_inv.values + decomp.seasonal.reindex(next_idx, method="nearest"),
+        index=next_idx
+    )
 
-    metrics['model_params'] = {
-        'order': order,
-        'seasonal_order': seasonal_order,
-        'description': model_description
-    }
-
-    if metrics['MAPE'] is not None:
-        metrics['forecast_accuracy'] = get_forecast_accuracy_description(metrics['MAPE'])
-    if metrics['R2'] is not None:
-        metrics['model_quality'] = get_model_quality_description(metrics['R2'])
-
-    confidence_level, confidence_color = get_forecast_confidence_level(len(sales_data), metrics.get('reliability_score'))
-    metrics['confidence'] = { 'level': confidence_level, 'color': confidence_color }
-
-    return (sales_data.to_frame(), forecast, metrics, debug_info) if debug else (sales_data.to_frame(), forecast, metrics)
+    hist = ts.to_frame(name=qty_col)
+    return (hist, forecast, metrics, dbg) if debug else (hist, forecast, metrics)
