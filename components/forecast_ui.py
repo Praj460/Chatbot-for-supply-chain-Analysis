@@ -1,186 +1,310 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from utils.forecasting import (
-    forecast_sales, 
-    get_forecast_confidence_level, 
-    get_model_quality_description,
-    get_forecast_accuracy_description,
-    calculate_reliability_score
-)
+from utils.forecasting import forecast_sales
 
 def render_forecast_tab(df):
     st.header("📈 Demand Forecasting")
-    render_product_forecast(df)
-    render_custom_forecast(df)
+    st.subheader("Filter and Generate Forecast")
 
-def render_product_forecast(df):
-    st.subheader("Product Demand Forecast")
-    product_list = df["Product Group"].dropna().unique()
-    selected_product = st.selectbox("Select Product", product_list)
-    show_debug = st.checkbox("Show debug info", value=False, key="product_debug")
+    # — Single-select filters —
+    country_list = sorted(df["Country"].dropna().unique())
+    selected_country = st.selectbox(
+        "Select Country",
+        country_list,
+        key="fc_country"
+    )
 
-    if st.button("Forecast Product Sales"):
-        with st.spinner("Generating forecast..."):
-            if show_debug:
-                sales_data, forecast, metrics, debug_info = forecast_sales(df, "Product Group", selected_product, debug=True)
-                display_forecast_results(sales_data, forecast, metrics, "Product Group", selected_product, debug_info)
-            else:
-                sales_data, forecast, metrics = forecast_sales(df, "Product Group", selected_product)
-                display_forecast_results(sales_data, forecast, metrics, "Product Group", selected_product)
+    product_list = sorted(df["Product Group"].dropna().unique())
+    selected_product = st.selectbox(
+        "Select Product Group",
+        product_list,
+        key="fc_product"
+    )
 
-def render_custom_forecast(df):
-    st.subheader("Custom Demand Forecast")
-    st.write("Select any dimension to forecast demand by:")
+    # — Number of months dropdown —
+    months = st.selectbox(
+        "Select Number of Months to Forecast",
+        [1, 2, 3, 4, 5, 6],
+        index=2,
+        key="fc_months"
+    )
 
-    custom_column = st.selectbox("Select dimension to forecast by", df.select_dtypes(include=["object"]).columns.tolist())
+    # — Generate button —
+    if st.button("Generate Forecast", key="fc_button"):
+        with st.spinner("Generating forecast…"):
+            filt = df[
+                (df["Country"] == selected_country) &
+                (df["Product Group"] == selected_product)
+            ].copy()
 
-    if custom_column:
-        custom_values = df[custom_column].dropna().unique()
-        selected_value = st.selectbox(f"Select {custom_column}", custom_values)
-        show_debug = st.checkbox("Show debug info", value=False, key="custom_debug")
+            if filt.empty:
+                st.warning(
+                    f"No data for Country {selected_country} & Product Group {selected_product}."
+                )
+                return
 
-        if st.button("Generate Custom Forecast"):
-            with st.spinner("Generating forecast..."):
-                if show_debug:
-                    sales_data, forecast, metrics, debug_info = forecast_sales(df, custom_column, selected_value, debug=True)
-                    display_forecast_results(sales_data, forecast, metrics, custom_column, selected_value, debug_info)
-                else:
-                    sales_data, forecast, metrics = forecast_sales(df, custom_column, selected_value)
-                    display_forecast_results(sales_data, forecast, metrics, custom_column, selected_value)
+            # — Call SARIMA with monthly Box–Cox —
+            history, full_forecast, metrics = forecast_sales(
+                filt,
+                date_col="Delivered to Client Date",
+                qty_col="Line Item Quantity",
+                freq="M",            # monthly aggregation
+                transform="boxcox",
+                debug=False
+            )
 
-def display_forecast_results(sales_data, forecast, metrics, dimension_name, dimension_value, debug_info=None):
-    if debug_info:
-        with st.expander("Debug Information", expanded=True):
-            st.subheader("Data Processing Debug Info")
-            for key, value in debug_info.items():
-                st.text(f"{key}: {value}")
-            
-            if 'model_choice' in debug_info:
-                st.subheader("Model Selection")
-                st.text(f"Selected model: {debug_info['model_choice']}")
-            if 'stationarity_test' in debug_info:
-                st.text(f"Stationarity test: {debug_info['stationarity_test']}")
-                if 'adf_p_value' in debug_info:
-                    st.text(f"ADF p-value: {debug_info['adf_p_value']}")
-            if sales_data is not None:
-                st.subheader("Raw Sales Data")
-                st.dataframe(sales_data.head(10))
+            # Trim to user‐selected horizon
+            forecast = full_forecast.iloc[:months]
 
-    if sales_data is not None:
-        if forecast is not None:
-            result_df = pd.concat([sales_data, forecast.to_frame("Forecast")])
-            fig = px.line(result_df, y=["Line Item Quantity", "Forecast"],
-                          title=f"Demand Forecast for {dimension_name}: {dimension_value}")
-            fig.update_layout(yaxis_title="Quantity", xaxis_title="Date", legend_title="Data Type", hovermode="x unified")
-            st.plotly_chart(fig, use_container_width=True)
-            display_metrics(metrics, sales_data)
-            display_forecast_statistics(sales_data, forecast)
-            display_forecast_details(forecast)
-            display_confidence_indicator(sales_data, metrics.get('reliability_score'))
-            display_model_details(metrics)
-        else:
-            if metrics and "error" in metrics:
-                st.error(f"Error: {metrics['error']}")
-                if sales_data is not None and not sales_data.empty:
-                    st.subheader("Available Data Statistics")
-                    st.write(f"Number of data points: {len(sales_data)}")
-                    st.write(f"Date range: {sales_data.index.min()} to {sales_data.index.max()}")
-                    st.write(f"Total quantity: {sales_data['Line Item Quantity'].sum()}")
-                    st.subheader("Available Data")
-                    st.dataframe(sales_data)
-            else:
-                st.warning(f"Not enough data to generate a forecast for {dimension_value}.")
-    else:
-        st.warning(f"No data available for the selected {dimension_name}.")
+            _render_results(
+                history,
+                forecast,
+                metrics,
+                f"{selected_country} | {selected_product}",
+                months
+            )
 
-def display_metrics(metrics, sales_data):
+            # — Additional summary tables —
+            display_top_manufacturing_sites(filt)
+            display_top_vendors(filt)
+            display_sites_and_vendors(filt)
+            display_monthly_delivery_seasonality(filt)
+            display_monthly_quantity_seasonality(filt)
+
+
+def _render_results(history, forecast, metrics, label, months):
+    # Error check
+    if history is None or forecast is None or metrics.get("error"):
+        st.error(metrics.get("error", "Insufficient data to forecast."))
+        return
+
+    # — Plot actual vs forecast —
+    st.subheader(f"Forecast for {label} (next {months} mo)")
+    df_plot = pd.concat([history, forecast.to_frame("Forecast")], axis=1)
+    fig = px.line(
+        df_plot,
+        y=[history.columns[0], "Forecast"],
+        title=f"{label}: Actual vs Forecast"
+    )
+    fig.update_layout(
+        xaxis_title="Date",
+        yaxis_title=history.columns[0],
+        hovermode="x unified"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # — Metrics display: RMSE / MAE / MAPE / Volatility —
+    volatility = history.std().iloc[0] / history.mean().iloc[0] * 100
+
     st.subheader("Model Performance Metrics")
-    col1, col2, col3, col4 = st.columns(4)
-    rmse = metrics.get('RMSE')
-    mae = metrics.get('MAE')
-    mape = metrics.get('MAPE')
-    r2 = metrics.get('R2')
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric(
+        "RMSE",
+        f"{metrics['RMSE']:.2f}" if metrics.get('RMSE') is not None else "N/A"
+    )
+    c2.metric(
+        "MAE",
+        f"{metrics['MAE']:.2f}" if metrics.get('MAE') is not None else "N/A"
+    )
+    c3.metric(
+        "MAPE",
+        f"{metrics['MAPE']:.2f}%" if metrics.get('MAPE') is not None else "N/A"
+    )
+    c4.metric(
+        "Volatility",
+        f"{volatility:.2f}%"
+    )
 
-    with col1:
-        st.metric("RMSE", f"{rmse:.2f}" if rmse is not None else "N/A")
-        st.caption("Root Mean Square Error (lower is better)")
-    with col2:
-        st.metric("MAE", f"{mae:.2f}" if mae is not None else "N/A")
-        st.caption("Mean Absolute Error (lower is better)")
-    with col3:
-        mape_display = f"{mape:.2f}%" if mape is not None else "N/A"
-        st.metric("MAPE", mape_display)
-        st.caption("Mean Absolute Percentage Error")
-    with col4:
-        st.metric("R²", f"{r2:.2f}" if r2 is not None else "N/A")
-        st.caption("Coefficient of Determination (higher is better)")
+    # — Forecast table —
+    st.subheader("Forecast Details")
+    df_f = forecast.to_frame("Forecasted Quantity")
+    # Format index as Mon YYYY
+    df_f.index = df_f.index.to_period("M").strftime("%b %Y")
+    st.dataframe(df_f.round(2))
 
-    quality = get_model_quality_description(r2)
-    if mae is not None and mape is not None:
-        st.info(f"This model shows a {quality} predictive power. Avg prediction error: {mae:.1f} units ({mape:.1f}%).")
-    else:
-        st.info(f"This model shows a {quality} predictive power.")
 
-    reliability_score = metrics.get('reliability_score')
-    if reliability_score is not None:
-        st.progress(reliability_score/100)
-        st.caption(f"Forecast Reliability Score: {reliability_score:.0f}%")
+# — Top-5 helper functions —
 
-def display_forecast_statistics(sales_data, forecast):
-    historical_mean = sales_data['Line Item Quantity'].mean()
-    forecast_mean = forecast.mean()
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("Average Weekly Demand", f"{int(historical_mean)}", delta=f"{int(forecast_mean - historical_mean)}")
-    with col2:
-        growth_rate = ((forecast_mean / historical_mean) - 1) * 100 if historical_mean > 0 else (100 if forecast_mean > 0 else 0)
-        st.metric("Forecast Growth", f"{growth_rate:.1f}%", delta=f"{growth_rate:.1f}%", delta_color="normal")
+def display_top_manufacturing_sites(filtered_df):
+    required = ["Manufacturing Site", "Line Item Quantity"]
+    if not set(required).issubset(filtered_df.columns):
+        st.warning("Manufacturing site data missing. Skipping table.")
+        return
 
-def display_forecast_details(forecast):
-    forecast_steps = len(forecast)
-    period_text = "weeks" if forecast_steps <= 8 else "periods"
-    st.subheader(f"Forecast for next {forecast_steps} {period_text}")
-    forecast_df = forecast.to_frame("Forecasted Quantity")
-    forecast_df.index = forecast_df.index.strftime('%b %d, %Y')
-    st.dataframe(forecast_df.astype(int))
+    st.subheader("Top 5 Manufacturing Sites by Total Quantity")
+    df_site = filtered_df.dropna(subset=required)
+    stats = (
+        df_site
+        .groupby("Manufacturing Site")["Line Item Quantity"]
+        .sum()
+        .nlargest(5)
+        .reset_index()
+    )
+    stats.columns = ["Manufacturing Site", "Total Quantity"]
+    st.table(stats)
 
-def display_confidence_indicator(sales_data, reliability_score=None):
-    data_points = len(sales_data)
-    confidence, color = get_forecast_confidence_level(data_points, reliability_score)
-    date_span = (sales_data.index.max() - sales_data.index.min()).days if not sales_data.empty else None
-    date_info = f" and a time span of {date_span} days" if date_span else ""
-    st.markdown(f"<p>Forecast confidence: <span style='color:{color};font-weight:bold'>{confidence}</span> (based on {data_points} data points{date_info})</p>", unsafe_allow_html=True)
 
-def display_model_details(metrics):
-    with st.expander("Model Details"):
-        if metrics and "model_params" in metrics:
-            order = metrics["model_params"]["order"]
-            seasonal_order = metrics["model_params"]["seasonal_order"]
-            description = metrics["model_params"]["description"]
-            st.write(f"Model: {description}")
-            st.code(f"order={order}, seasonal_order={seasonal_order}")
-            st.info("Model parameters were automatically selected based on time series patterns.")
-        else:
-            st.write("SARIMAX Model Parameters:")
-            st.code("order=(1,1,1), seasonal_order=(1,1,1,4)")
+def display_top_vendors(filtered_df):
+    required = [
+        "Vendor",
+        "Line Item Quantity",
+        "Scheduled Delivery Date",
+        "Delivered to Client Date",
+        "Freight Cost (USD)"
+    ]
+    if not set(required).issubset(filtered_df.columns):
+        st.warning("Vendor data missing. Skipping table.")
+        return
 
-        if metrics and "error" not in metrics:
-            if "forecast_accuracy" in metrics:
-                accuracy_desc, status = metrics["forecast_accuracy"]
-                getattr(st, status)(accuracy_desc)
-            elif metrics.get("MAPE") is not None:
-                accuracy_desc, status = get_forecast_accuracy_description(metrics["MAPE"])
-                getattr(st, status)(accuracy_desc)
-            if "reliability_score" in metrics and metrics["reliability_score"] is not None:
-                score = metrics["reliability_score"]
-                if score >= 70:
-                    st.success(f"Reliability score: {score:.0f}% - High confidence in forecast.")
-                elif score >= 40:
-                    st.info(f"Reliability score: {score:.0f}% - Moderate confidence in forecast.")
-                else:
-                    st.warning(f"Reliability score: {score:.0f}% - Low confidence. Consider more data.")
-                st.caption("Reliability score is derived from R² and MAPE.")
-            if "confidence" in metrics:
-                conf = metrics["confidence"]
-                st.markdown(f"<p>Model confidence level: <span style='color:{conf['color']};font-weight:bold'>{conf['level']}</span></p>", unsafe_allow_html=True)
+    st.subheader("Top 5 Vendors by Quantity & On-time Delivery")
+    df_v = (
+        filtered_df
+        .dropna(subset=required)
+        .assign(
+            Scheduled=lambda d: pd.to_datetime(
+                d["Scheduled Delivery Date"], errors="coerce"),
+            Delivered=lambda d: pd.to_datetime(
+                d["Delivered to Client Date"], errors="coerce")
+        )
+        .dropna(subset=["Scheduled", "Delivered"])
+    )
+    df_v["On Time"] = df_v["Delivered"] <= df_v["Scheduled"]
+
+    vendor_stats = (
+        df_v
+        .groupby("Vendor")
+        .agg(
+            Total_Quantity=("Line Item Quantity", "sum"),
+            Deliveries=("Vendor", "count"),
+            On_Time_Pct=("On Time", "mean")
+        )
+        .nlargest(5, "Total_Quantity")
+        .reset_index()
+    )
+    vendor_stats["On-time Delivery (%)"] = (vendor_stats["On_Time_Pct"] * 100).round(1)
+
+    out = vendor_stats[[
+        "Vendor",
+        "Total_Quantity",
+        "Deliveries",
+        "On-time Delivery (%)"
+    ]]
+    out.columns = [
+        "Vendor",
+        "Total Quantity",
+        "Deliveries",
+        "On-time Delivery (%)"
+    ]
+    st.table(out)
+
+
+def display_sites_and_vendors(filtered_df):
+    required = ["Manufacturing Site", "Vendor", "Line Item Quantity"]
+    if not set(required).issubset(filtered_df.columns):
+        st.warning("Site/vendor data missing. Skipping table.")
+        return
+
+    st.subheader("Top 5 Sites with Vendors & Quantity")
+    df_c = filtered_df.dropna(subset=required)
+    top_sites = (
+        df_c
+        .groupby("Manufacturing Site")["Line Item Quantity"]
+        .sum()
+        .nlargest(5)
+        .index
+    )
+    df_top = df_c[df_c["Manufacturing Site"].isin(top_sites)]
+    combined = (
+        df_top
+        .groupby(["Manufacturing Site", "Vendor"])["Line Item Quantity"]
+        .sum()
+        .reset_index()
+    )
+    combined.columns = ["Manufacturing Site", "Vendor", "Total Quantity"]
+    combined = combined.sort_values([
+        "Manufacturing Site",
+        "Total Quantity"
+    ], ascending=[True, False])
+    st.table(combined)
+
+def display_monthly_delivery_seasonality(filtered_df):
+    """📈 Monthly Seasonality: Avg Number of Deliveries"""
+    st.subheader("📅 Monthly Seasonality: Avg Number of Deliveries")
+
+    if "Delivered to Client Date" not in filtered_df.columns:
+        st.warning("Delivered to Client Date column missing.")
+        return
+
+    # Prepare month buckets
+    df = filtered_df.copy()
+    df["Delivered to Client Date"] = pd.to_datetime(df["Delivered to Client Date"], errors="coerce")
+    df = df.dropna(subset=["Delivered to Client Date"])
+    df["Month"] = df["Delivered to Client Date"].dt.month_name()
+    df["Month_Num"] = df["Delivered to Client Date"].dt.month
+
+    # Count deliveries per month & year, then average across years
+    monthly_counts = (
+        df.groupby(["Month_Num", "Month", df["Delivered to Client Date"].dt.year])
+          .size()
+          .reset_index(name="Deliveries")
+    )
+    seasonal = (
+        monthly_counts
+        .groupby(["Month_Num", "Month"])["Deliveries"]
+        .mean()
+        .reset_index()
+        .sort_values("Month_Num")
+    )
+
+    # Plot
+    fig = px.line(
+        seasonal,
+        x="Month",
+        y="Deliveries",
+        markers=True,
+        title="Average Monthly Deliveries"
+    )
+    fig.update_layout(xaxis_title="", yaxis_title="Avg # Deliveries", hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def display_monthly_quantity_seasonality(filtered_df):
+    """📦 Monthly Seasonality: Avg Line-Item Quantity per Delivery"""
+    st.subheader("📦 Monthly Seasonality: Avg Line-Item Quantity per Delivery")
+
+    required = ["Delivered to Client Date", "Line Item Quantity"]
+    if not set(required).issubset(filtered_df.columns):
+        st.warning("Required columns missing (Delivered to Client Date, Line Item Quantity).")
+        return
+
+    df = filtered_df.copy()
+    df["Delivered to Client Date"] = pd.to_datetime(df["Delivered to Client Date"], errors="coerce")
+    df = df.dropna(subset=["Delivered to Client Date", "Line Item Quantity"])
+    df["Month"] = df["Delivered to Client Date"].dt.month_name()
+    df["Month_Num"] = df["Delivered to Client Date"].dt.month
+
+    # Compute average quantity per delivery per month-year, then average across years
+    monthly_qty = (
+        df.groupby(["Month_Num", "Month", df["Delivered to Client Date"].dt.year])["Line Item Quantity"]
+          .mean()
+          .reset_index(name="Avg Quantity")
+    )
+    seasonal = (
+        monthly_qty
+        .groupby(["Month_Num", "Month"])["Avg Quantity"]
+        .mean()
+        .reset_index()
+        .sort_values("Month_Num")
+    )
+
+    # Plot
+    fig = px.line(
+        seasonal,
+        x="Month",
+        y="Avg Quantity",
+        markers=True,
+        title="Average Monthly Line-Item Quantity"
+    )
+    fig.update_layout(xaxis_title="", yaxis_title="Avg Quantity per Delivery", hovermode="x unified")
+    st.plotly_chart(fig, use_container_width=True)
